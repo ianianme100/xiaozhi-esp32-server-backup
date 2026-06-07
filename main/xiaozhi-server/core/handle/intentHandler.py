@@ -1,4 +1,4 @@
-﻿import json
+import json
 import uuid
 import asyncio
 from typing import TYPE_CHECKING
@@ -38,8 +38,17 @@ async def handle_user_intent(conn: "ConnectionHandler", text):
         return True
 
     # 燈光控制走硬解析，不交給大模型猜工具名
-    # if await handle_hard_light_command(conn, text):
-    #     return True
+    if await handle_hard_ir_command(conn, text):
+        return True
+
+    if await handle_hard_sensor_query(conn, text):
+        return True
+
+    if await handle_hard_nurse_command(conn, text):
+        return True
+
+    if await handle_hard_light_command(conn, text):
+        return True
 
     if conn.intent_type == "function_call":
         # 使用支持function calling的聊天方法,不再进行意图分析
@@ -215,6 +224,293 @@ async def process_intent_result(
     except json.JSONDecodeError as e:
         conn.logger.bind(tag=TAG).error(f"处理意图结果时出错: {e}")
         return False
+
+
+
+
+def parse_hard_ir_command(text):
+    if not isinstance(text, str):
+        return None
+
+    normalized = (
+        text.lower()
+        .replace(" ", "")
+        .replace("，", "")
+        .replace("。", "")
+        .replace("！", "")
+        .replace("？", "")
+        .replace("!", "")
+        .replace("?", "")
+    )
+
+    learn = any(term in normalized for term in [
+        "學習", "学习", "記住", "记住", "配對", "配对", "錄製", "录制", "learn"
+    ])
+
+    status_terms = ["狀態", "状态", "學過", "学过", "記憶", "记忆", "status"]
+    if any(term in normalized for term in status_terms) and any(term in normalized for term in ["紅外線", "红外线", "ir", "風扇", "风扇", "電風扇", "电风扇", "關燈器", "关灯器"]):
+        return ("self_ir_status", "紅外線狀態")
+
+    fan_terms = ["電風扇", "电风扇", "風扇", "风扇", "fan"]
+    light_switch_terms = ["關燈器", "关灯器", "遙控燈", "遥控灯", "燈控", "灯控", "light"]
+
+    wants_fan = any(term in normalized for term in fan_terms)
+    wants_light_switch = any(term in normalized for term in light_switch_terms)
+
+    if wants_fan:
+        speed_down_terms = ["調弱", "调弱", "弱", "變弱", "变弱", "減弱", "减弱", "降低", "降速", "慢一點", "慢一点", "speeddown", "down", "-"]
+        if any(term in normalized for term in speed_down_terms):
+            return ("self_ir_learn_fan_speed_down" if learn else "self_ir_send_fan_speed_down", "電風扇調弱")
+
+        speed_up_terms = ["加強", "加强", "強", "强", "變強", "变强", "增強", "增强", "提高", "升速", "快一點", "快一点", "speedup", "up", "+"]
+        general_speed_terms = ["強弱", "强弱", "風速", "风速", "速度", "調速", "调速", "檔位", "档位"]
+        if any(term in normalized for term in speed_up_terms) or any(term in normalized for term in general_speed_terms):
+            return ("self_ir_learn_fan_speed" if learn else "self_ir_send_fan_speed", "電風扇加強")
+
+        power_terms = ["開關", "开关", "開", "开", "關", "关", "電源", "电源", "啟動", "启动", "停止", "power", "on", "off"]
+        if learn or any(term in normalized for term in power_terms):
+            return ("self_ir_learn_fan_power" if learn else "self_ir_send_fan_power", "電風扇開關")
+
+    if wants_light_switch:
+        power_terms = ["開關", "开关", "開", "开", "關", "关", "電源", "电源", "power", "on", "off"]
+        if learn or any(term in normalized for term in power_terms):
+            return ("self_ir_learn_light_power" if learn else "self_ir_send_light_power", "關燈器開關")
+
+    return None
+async def handle_hard_ir_command(conn: "ConnectionHandler", text):
+    parsed = parse_hard_ir_command(text)
+    if not parsed:
+        return False
+
+    tool_name, label = parsed
+    if not conn.func_handler:
+        conn.sentence_id = str(uuid.uuid4().hex)
+        await send_stt_message(conn, text)
+        speak_txt(conn, "紅外線工具尚未初始化，請稍後再試。")
+        return True
+
+    if not conn.func_handler.has_tool(tool_name):
+        conn.sentence_id = str(uuid.uuid4().hex)
+        await send_stt_message(conn, text)
+        speak_txt(conn, "目前找不到紅外線工具，請確認設備已重新燒錄並連線。")
+        return True
+
+    conn.logger.bind(tag=TAG).info(f"硬解析紅外線風扇指令: {text} -> {tool_name}")
+    conn.sentence_id = str(uuid.uuid4().hex)
+    await send_stt_message(conn, text)
+    conn.client_abort = False
+    conn.dialogue.put(Message(role="user", content=text))
+
+    if "learn" in tool_name:
+        speak_txt(conn, f"請把風扇遙控器對準紅外線接收器，按下{label}按鍵。")
+
+    function_call_data = {
+        "name": tool_name,
+        "id": str(uuid.uuid4().hex),
+        "arguments": "{}",
+    }
+    enqueue_tool_report(conn, tool_name, {})
+    result = await conn.func_handler.handle_llm_function_call(conn, function_call_data)
+    enqueue_tool_report(
+        conn,
+        tool_name,
+        {},
+        str(result.result) if result and result.result else None,
+        report_tool_call=False,
+    )
+
+    if result and result.action in [Action.ERROR, Action.NOTFOUND]:
+        reply = result.response if result.response else result.result
+    elif result:
+        reply = result.response if result.response else result.result
+    else:
+        reply = "紅外線工具沒有回傳結果。"
+
+    speak_txt(conn, str(reply))
+    return True
+
+def parse_hard_sensor_query(text):
+    if not isinstance(text, str):
+        return None
+
+    normalized = (
+        text.lower()
+        .replace(" ", "")
+        .replace("，", "")
+        .replace("。", "")
+        .replace("！", "")
+        .replace("!", "")
+        .replace("?", "")
+        .replace("？", "")
+    )
+
+    air_terms = [
+        "空氣品質", "空气品质", "空氣質量", "空气质量", "空氣", "空气",
+        "tvoc", "voc", "甲醛", "異味", "异味",
+    ]
+    temp_terms = [
+        "溫溼度", "温湿度", "溫濕度", "温濕度", "溫度", "温度",
+        "濕度", "湿度", "dht", "幾度", "几度",
+    ]
+
+    wants_air = any(term in normalized for term in air_terms)
+    wants_temp = any(term in normalized for term in temp_terms)
+
+    if wants_air and wants_temp:
+        return [
+            ("空氣品質_讀取", "空氣品質"),
+            ("溫溼度_讀取", "溫溼度"),
+        ]
+    if wants_air:
+        return [("空氣品質_讀取", "空氣品質")]
+    if wants_temp:
+        return [("溫溼度_讀取", "溫溼度")]
+    return None
+
+
+async def handle_hard_sensor_query(conn: "ConnectionHandler", text):
+    parsed = parse_hard_sensor_query(text)
+    if not parsed:
+        return False
+
+    if not conn.func_handler:
+        conn.sentence_id = str(uuid.uuid4().hex)
+        await send_stt_message(conn, text)
+        speak_txt(conn, "感測器工具尚未初始化，請稍後再試。")
+        return True
+
+    available_tools = []
+    missing_labels = []
+    for tool_name, label in parsed:
+        if conn.func_handler.has_tool(tool_name):
+            available_tools.append((tool_name, label))
+        else:
+            missing_labels.append(label)
+
+    if not available_tools:
+        conn.sentence_id = str(uuid.uuid4().hex)
+        await send_stt_message(conn, text)
+        speak_txt(conn, "目前找不到感測器讀取工具，請確認設備 MCP 已連線。")
+        return True
+
+    conn.logger.bind(tag=TAG).info(f"硬解析感測器查詢: {text} -> {[name for name, _ in available_tools]}")
+    conn.sentence_id = str(uuid.uuid4().hex)
+    await send_stt_message(conn, text)
+    conn.client_abort = False
+    conn.dialogue.put(Message(role="user", content=text))
+
+    replies = []
+    for tool_name, _ in available_tools:
+        function_call_data = {
+            "name": tool_name,
+            "id": str(uuid.uuid4().hex),
+            "arguments": "{}",
+        }
+        enqueue_tool_report(conn, tool_name, {})
+        result = await conn.func_handler.handle_llm_function_call(conn, function_call_data)
+        enqueue_tool_report(
+            conn,
+            tool_name,
+            {},
+            str(result.result) if result and result.result else None,
+            report_tool_call=False,
+        )
+
+        if result and result.action in [Action.ERROR, Action.NOTFOUND]:
+            replies.append(result.response if result.response else result.result)
+        elif result:
+            replies.append(result.response if result.response else result.result)
+
+    replies = [str(reply) for reply in replies if reply]
+    if missing_labels:
+        replies.append("另外，" + "、".join(missing_labels) + "工具目前沒有連上。")
+
+    speak_txt(conn, " ".join(replies) if replies else "感測器沒有回傳資料，請稍後再試。")
+    return True
+
+def parse_hard_nurse_command(text):
+    if not isinstance(text, str):
+        return None
+
+    normalized = (
+        text.lower()
+        .replace(" ", "")
+        .replace("，", "")
+        .replace("。", "")
+        .replace("！", "")
+        .replace("!", "")
+        .replace("?", "")
+        .replace("？", "")
+    )
+
+    cancel_terms = [
+        "取消報警", "取消报警", "停止報警", "停止报警", "關閉報警", "关闭报警",
+        "取消蜂鳴器", "取消蜂鸣器", "停止蜂鳴器", "停止蜂鸣器", "關閉蜂鳴器", "关闭蜂鸣器",
+        "不用幫助", "不用帮助", "解除緊急", "解除紧急",
+    ]
+    trigger_terms = [
+        "報警", "报警", "蜂鳴器", "蜂鸣器", "呼叫蜂鳴器", "呼叫蜂鸣器",
+        "需要幫助", "需要帮助", "幫我", "帮我", "救命", "緊急", "紧急",
+        "急救", "求救", "呼叫護士", "呼叫护士", "護理師", "护理师",
+    ]
+
+    if any(term in normalized for term in cancel_terms):
+        return "self_nurse_call_cancel", "已取消緊急呼叫。"
+    if any(term in normalized for term in trigger_terms):
+        return "self_nurse_call_trigger", "已啟動緊急呼叫，需要幫助。"
+    return None
+
+
+async def handle_hard_nurse_command(conn: "ConnectionHandler", text):
+    parsed = parse_hard_nurse_command(text)
+    if not parsed:
+        return False
+
+    tool_name, reply = parsed
+
+    if not conn.func_handler:
+        conn.sentence_id = str(uuid.uuid4().hex)
+        await send_stt_message(conn, text)
+        speak_txt(conn, "緊急呼叫工具尚未初始化，請稍後再試。")
+        return True
+
+    if not conn.func_handler.has_tool(tool_name):
+        conn.logger.bind(tag=TAG).warning(f"Emergency tool missing: {tool_name}")
+        conn.sentence_id = str(uuid.uuid4().hex)
+        await send_stt_message(conn, text)
+        speak_txt(conn, "目前找不到緊急呼叫工具，請確認設備已連線。")
+        return True
+
+    conn.logger.bind(tag=TAG).info(f"硬解析緊急呼叫: {text} -> {tool_name}")
+
+    conn.sentence_id = str(uuid.uuid4().hex)
+    await send_stt_message(conn, text)
+    conn.client_abort = False
+    conn.dialogue.put(Message(role="user", content=text))
+
+    function_call_data = {
+        "name": tool_name,
+        "id": str(uuid.uuid4().hex),
+        "arguments": "{}",
+    }
+
+    enqueue_tool_report(conn, tool_name, {})
+    result = await conn.func_handler.handle_llm_function_call(conn, function_call_data)
+    enqueue_tool_report(
+        conn,
+        tool_name,
+        {},
+        str(result.result) if result and result.result else None,
+        report_tool_call=False,
+    )
+
+    if result and result.action in [Action.ERROR, Action.NOTFOUND]:
+        error_text = result.response if result.response else result.result
+        speak_txt(conn, error_text or "緊急呼叫執行失敗，請再試一次。")
+        return True
+
+    speak_txt(conn, reply)
+    return True
 
 def parse_hard_light_command(text):
     if not isinstance(text, str):
