@@ -258,7 +258,7 @@ def match_ir_command(text):
     ])
 
     def ir_result(tool_name, label):
-        announce = f"請把風扇遙控器對準紅外線接收器，按下{label}按鍵。" if "learn" in tool_name else None
+        announce = f"請把遙控器對準紅外線接收器，按下{label}按鍵。" if "learn" in tool_name else None
         return MatchResult(
             tools=[(tool_name, label)],
             reply=lambda results: results[0] if results else "紅外線工具沒有回傳結果。",
@@ -268,14 +268,46 @@ def match_ir_command(text):
         )
 
     status_terms = ["狀態", "状态", "學過", "学过", "記憶", "记忆", "status"]
-    if any(term in normalized for term in status_terms) and any(term in normalized for term in ["紅外線", "红外线", "ir", "風扇", "风扇", "電風扇", "电风扇", "關燈器", "关灯器"]):
+    status_subjects = [
+        "紅外線", "红外线", "ir", "風扇", "风扇", "電風扇", "电风扇",
+        "關燈器", "关灯器", "冷氣", "冷气", "空調", "空调", "電視", "电视",
+    ]
+    if any(term in normalized for term in status_terms) and any(term in normalized for term in status_subjects):
         return ir_result("self_ir_status", "紅外線狀態")
 
+    ac_terms = ["冷氣", "冷气", "空調", "空调", "冷氣機", "冷气机"]
+    tv_terms = ["電視", "电视"]
     fan_terms = ["電風扇", "电风扇", "風扇", "风扇", "fan"]
-    light_switch_terms = ["關燈器", "关灯器", "遙控燈", "遥控灯", "燈控", "灯控", "light"]
+    light_switch_terms = ["關燈器", "关灯器", "遙控燈", "遥控灯", "燈控", "灯控"]
 
+    wants_ac = any(term in normalized for term in ac_terms)
+    wants_tv = any(term in normalized for term in tv_terms)
     wants_fan = any(term in normalized for term in fan_terms)
     wants_light_switch = any(term in normalized for term in light_switch_terms)
+
+    close_terms = ["關閉", "关闭", "關掉", "关掉", "關", "关", "熄滅", "熄灭", "熄", "停止", "off", "close"]
+    open_terms = ["打開", "打开", "開啟", "开启", "開", "开", "啟動", "启动", "on", "open"]
+
+    def detect_action():
+        if any(term in normalized for term in close_terms):
+            return "close"
+        if any(term in normalized for term in open_terms):
+            return "open"
+        return None
+
+    if wants_ac:
+        action = detect_action()
+        if action == "open":
+            return ir_result("self_ir_learn_ac_open" if learn else "self_ir_send_ac_open", "冷氣開")
+        if action == "close":
+            return ir_result("self_ir_learn_ac_close" if learn else "self_ir_send_ac_close", "冷氣關")
+
+    if wants_tv:
+        action = detect_action()
+        if action == "open":
+            return ir_result("self_ir_learn_tv_open" if learn else "self_ir_send_tv_open", "電視開")
+        if action == "close":
+            return ir_result("self_ir_learn_tv_close" if learn else "self_ir_send_tv_close", "電視關")
 
     if wants_fan:
         speed_down_terms = ["調弱", "调弱", "弱", "變弱", "变弱", "減弱", "减弱", "降低", "降速", "慢一點", "慢一点", "speeddown", "down", "-"]
@@ -287,9 +319,11 @@ def match_ir_command(text):
         if any(term in normalized for term in speed_up_terms) or any(term in normalized for term in general_speed_terms):
             return ir_result("self_ir_learn_fan_speed" if learn else "self_ir_send_fan_speed", "電風扇加強")
 
-        power_terms = ["開關", "开关", "開", "开", "關", "关", "電源", "电源", "啟動", "启动", "停止", "power", "on", "off"]
-        if learn or any(term in normalized for term in power_terms):
-            return ir_result("self_ir_learn_fan_power" if learn else "self_ir_send_fan_power", "電風扇開關")
+        action = detect_action()
+        if action == "open":
+            return ir_result("self_ir_learn_fan_open" if learn else "self_ir_send_fan_open", "電風扇開")
+        if action == "close":
+            return ir_result("self_ir_learn_fan_close" if learn else "self_ir_send_fan_close", "電風扇關")
 
     if wants_light_switch:
         power_terms = ["開關", "开关", "開", "开", "關", "关", "電源", "电源", "power", "on", "off"]
