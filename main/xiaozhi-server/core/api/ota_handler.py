@@ -179,7 +179,7 @@ class OTAHandler(BaseHandler):
             # - http_port is used to construct OTA download URLs (server["http_port"])
             websocket_port = int(server_config.get("port", 8000))
             http_port = int(server_config.get("http_port", 8003))
-            local_ip = get_local_ip()
+            local_ip = get_local_ip(self.config)
 
             # Determine device model (prefer headers)
             device_model = ""
@@ -356,7 +356,7 @@ class OTAHandler(BaseHandler):
         """处理 OTA GET 请求"""
         try:
             server_config = self.config["server"]
-            local_ip = get_local_ip()
+            local_ip = get_local_ip(self.config)
             # use websocket port for websocket URL
             websocket_port = int(server_config.get("port", 8000))
             websocket_url = self._get_websocket_url(local_ip, websocket_port)

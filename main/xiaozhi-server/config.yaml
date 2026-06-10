@@ -10,6 +10,10 @@ server:
   # 服务器监听地址和端口(Server listening address and port)
   ip: 0.0.0.0
   port: 8000
+  # 對外公告給設備的 IP（OTA / websocket / 視覺分析接口會用這個 IP 組 URL）。
+  # 多網卡環境下自動偵測可能會抓到錯誤的介面（例如 169.254.x.x），
+  # 留空則自動偵測，填了就固定使用這個 IP，例如手機熱點的 172.20.10.2。
+  public_ip: "172.20.10.4"
   # http服务的端口，用于简单OTA接口(单服务部署)，以及视觉分析接口
   http_port: 8003
   # 这个websocket配置是指ota接口向设备发送的websocket地址

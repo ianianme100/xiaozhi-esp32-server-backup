@@ -17,7 +17,15 @@ from typing import Callable, Any
 TAG = __name__
 
 
-def get_local_ip():
+def get_local_ip(config: dict = None):
+    # 自動偵測在多網卡（例如同時有實體網路 + 手機熱點）環境下不一定準確，
+    # 連到 8.8.8.8 用的介面可能是沒有對外連線的 169.254.x.x（APIPA）位址。
+    # 若 config 裡有設定 server.public_ip，優先使用它，避免裝置端拿到錯誤的 IP。
+    if config:
+        public_ip = config.get("server", {}).get("public_ip", "").strip()
+        if public_ip:
+            return public_ip
+
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # Connect to Google's DNS servers
@@ -531,7 +539,7 @@ def get_vision_url(config: dict) -> str:
     server_config = config["server"]
     vision_explain = server_config.get("vision_explain", "")
     if "你的" in vision_explain:
-        local_ip = get_local_ip()
+        local_ip = get_local_ip(config)
         port = int(server_config.get("http_port", 8003))
         vision_explain = f"http://{local_ip}:{port}/mcp/vision/explain"
     return vision_explain

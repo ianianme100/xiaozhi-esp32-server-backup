@@ -80,12 +80,12 @@ async def main():
     if not read_config_from_api:
         logger.bind(tag=TAG).info(
             "OTA接口是\t\thttp://{}:{}/xiaozhi/ota/",
-            get_local_ip(),
+            get_local_ip(config),
             port,
         )
     logger.bind(tag=TAG).info(
         "视觉分析接口是\thttp://{}:{}/mcp/vision/explain",
-        get_local_ip(),
+        get_local_ip(config),
         port,
     )
     mcp_endpoint = config.get("mcp_endpoint", None)
@@ -108,7 +108,7 @@ async def main():
 
     logger.bind(tag=TAG).info(
         "Websocket地址是\tws://{}:{}/xiaozhi/v1/",
-        get_local_ip(),
+        get_local_ip(config),
         websocket_port,
     )
 
